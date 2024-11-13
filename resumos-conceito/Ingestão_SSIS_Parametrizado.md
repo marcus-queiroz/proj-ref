@@ -63,11 +63,11 @@ VALUES
     - Adicione um **Foreach Loop Container** para iterar pelos registros da tabela `FileMetadata`.
     - Use uma **Execute SQL Task** para selecionar as pastas e carregar as variáveis SSIS.
     - Query de seleção:
-        ```sql
+```sql
 SELECT FolderPath, FileType, Delimiter, DestinationTable, SchemaMapping
 FROM FileMetadata
 WHERE Processed = 0;
-		```
+```
         
 3. **Script Component Source**:
     
