@@ -21,19 +21,18 @@ A solução é composta por três elementos principais:
 
 1. **Tabela de Controle (`FileControl`)**:
     
-    - Gerencia os processos de importação (grupos de arquivos de clientes).
-    - Armazena o status de cada processo e qual worker está responsável por ele.
+    - Gerencia quais grupos de tabelas (ex.: `ClienteA`, `ClienteB`) precisam ser processados e qual worker foi designado.
 2. **Tabela de Parâmetros dos Arquivos (`FileParameters`)**:
     
-    - Armazena os detalhes de cada arquivo dentro de um processo (como nome do arquivo, parâmetros adicionais, status).
+    - Armazena os detalhes de cada arquivo dentro de um processo (como nome do arquivo, parâmetros adicionais, status, caminho do diretório).
     - Relaciona os arquivos com o processo correspondente.
 3. **Pacotes SSIS e Lógica SQL**:
     
     - **Pacote Master**:
-        - Gerencia a lógica de distribuição dos processos para os workers.
-        - Chama o worker designado, com base no controle centralizado.
+		- Chama o worker designado (definido na procedure).
+		- O worker processa os arquivos associados ao cliente e atualiza a tabela `FileControl` ao final.
     - **Pacotes Workers**:
-        - Processam os arquivos atribuídos ao cliente relacionado ao processo.
+        - Cada worker é um pacote genérico que processa os arquivos de um único cliente ou grupo.
 
 ---
 
@@ -112,7 +111,7 @@ Aqui está o detalhamento técnico para implementar a solução discutida anteri
 Gerencia os processos de importação (um para cada cliente ou grupo).
 ```sql
 CREATE TABLE FileControl (
-    ProcessID INT IDENTITY PRIMARY KEY,        -- Identificador único do processo
+    ProcessID INT IDENTITY PRIMARY KEY,       -- Identificador único do processo
     ProcessName NVARCHAR(255),                -- Nome do cliente ou grupo (ex.: ClienteA)
     WorkerAssigned NVARCHAR(50),              -- Nome do worker designado
     Status NVARCHAR(50),                      -- Status: Pending, InProgress, Completed, Failed
@@ -733,3 +732,221 @@ A manutenção da solução requer:
 1. **Monitoramento contínuo** para identificar problemas rapidamente.
 2. **Dinâmica de trabalho organizada**, com controle de versão e automação de deploys.
 3. **Planejamento de rollback** para mitigar riscos no ciclo de produção
+
+
+
+
+
+--- 
+
+
+
+
+
+### **Resumo mais direto**
+
+1. **Tabela `FileControl`**:
+    
+    - Gerencia quais grupos de tabelas (ex.: `ClienteA`, `ClienteB`) precisam ser processados e qual worker foi designado.
+2. **Tabela `FileParameters`**:
+    
+    - Armazena os detalhes de cada arquivo (ex.: parâmetros de importação).
+3. **Procedure no SQL Server**:
+    
+    - Bloqueia um processo (`ClienteA`) para um worker.
+    - Define qual pacote worker será chamado pelo SSIS.
+    - Atualiza o status da tabela `FileControl`.
+4. **Pacote SSIS Master**:
+    
+    - Chama o worker designado (definido na procedure).
+    - O worker processa os arquivos associados ao cliente e atualiza a tabela `FileControl` ao final.
+5. **Workers SSIS**:
+    
+    - Cada worker é um pacote genérico que processa os arquivos de um único cliente ou grupo.
+
+---
+
+### **Passo 1: Estrutura das Tabelas**
+
+#### **Tabela `FileControl`**
+
+Gerencia quais processos (clientes) serão executados e os workers associados.
+```sql
+CREATE TABLE FileControl (
+    ProcessID INT IDENTITY PRIMARY KEY,        -- Identificador único do processo
+    ProcessName NVARCHAR(255),                -- Nome do cliente ou processo (ex.: ClienteA)
+    WorkerAssigned NVARCHAR(50),              -- Nome do worker reservado
+    Status NVARCHAR(50),                      -- Status: Pending, InProgress, Completed, Failed
+    CreatedAt DATETIME DEFAULT GETDATE(),     -- Data/hora de criação
+    StartTime DATETIME NULL,                  -- Data/hora de início
+    EndTime DATETIME NULL                     -- Data/hora de conclusão
+);
+```
+
+#### **Tabela `FileParameters`**
+
+Armazena os detalhes dos arquivos que serão processados pelo worker.
+```sql
+CREATE TABLE FileParameters (
+    FileID INT IDENTITY PRIMARY KEY,          -- Identificador único do arquivo
+    ProcessID INT,                            -- Relacionado ao ProcessID da FileControl
+    FileName NVARCHAR(255),                   -- Nome do arquivo
+    Parameter1 NVARCHAR(255),                 -- Parâmetro de importação 1
+    Parameter2 NVARCHAR(255),                 -- Parâmetro de importação 2
+    Status NVARCHAR(50),                      -- Status: Pending, InProgress, Completed, Failed
+    CreatedAt DATETIME DEFAULT GETDATE(),     -- Data/hora de criação
+    StartTime DATETIME NULL,                  -- Data/hora de início
+    EndTime DATETIME NULL                     -- Data/hora de conclusão
+);
+```
+
+
+---
+
+### **Passo 2: Procedure no SQL Server**
+
+A procedure gerencia a lógica de atribuição de workers e bloqueio de processos.
+```sql
+CREATE PROCEDURE AssignWorkerToProcess
+AS
+BEGIN
+    BEGIN TRAN;
+
+    DECLARE @ProcessID INT, @ProcessName NVARCHAR(255), @WorkerAssigned NVARCHAR(50);
+
+    -- Seleciona o próximo processo pendente
+    SELECT TOP 1 @ProcessID = ProcessID, @ProcessName = ProcessName
+    FROM FileControl WITH (ROWLOCK, UPDLOCK, READPAST)
+    WHERE Status = 'Pending'
+    ORDER BY CreatedAt;
+
+    -- Se nenhum processo estiver pendente, encerra
+    IF @ProcessID IS NULL
+    BEGIN
+        COMMIT TRAN;
+        RETURN;
+    END;
+
+    -- Define qual worker será atribuído (você pode implementar uma lógica mais complexa aqui)
+    SET @WorkerAssigned = 'Worker_' + @ProcessName;
+
+    -- Atualiza o status do processo para InProgress e associa o worker
+    UPDATE FileControl
+    SET Status = 'InProgress', WorkerAssigned = @WorkerAssigned, StartTime = GETDATE()
+    WHERE ProcessID = @ProcessID;
+
+    -- Retorna os detalhes para o SSIS (se necessário)
+    SELECT @ProcessID AS ProcessID, @ProcessName AS ProcessName, @WorkerAssigned AS WorkerAssigned;
+
+    COMMIT TRAN;
+END;
+```
+
+
+---
+
+### **Passo 3: Pacote SSIS Master**
+
+O pacote Master é responsável por:
+
+1. Chamar a procedure `AssignWorkerToProcess`.
+2. Capturar os detalhes do processo (cliente e worker designado).
+3. Invocar o worker correspondente.
+
+#### **Configuração no SSIS Master**:
+
+1. **Execute SQL Task**:
+    
+    - Chama a procedure `AssignWorkerToProcess` e captura os resultados (ProcessID, ProcessName, WorkerAssigned).
+    - Armazene os valores em variáveis SSIS:
+        - `ProcessID`
+        - `ProcessName`
+        - `WorkerAssigned`
+2. **Expression Task ou Condicional**:
+    
+    - Use a variável `WorkerAssigned` para determinar qual worker será chamado.
+3. **Execute Package Task**:
+    
+    - Chama o worker designado (`Worker_ClienteA`, `Worker_ClienteB`, etc.).
+    - Passe o `ProcessID` e/ou outros parâmetros necessários como variáveis.
+
+---
+
+### **Passo 4: Workers SSIS**
+
+Cada worker é genérico e processa os arquivos associados ao `ProcessID`.
+
+#### **Configuração no Worker**:
+
+1. **Execute SQL Task**:
+    
+    - Seleciona os arquivos associados ao `ProcessID` e atualiza o status para `InProgress`:
+```sql
+UPDATE FileParameters
+SET Status = 'InProgress', StartTime = GETDATE()
+WHERE ProcessID = ? AND Status = 'Pending';
+```
+        
+2. **Data Flow Task**:
+    
+    - Processa os arquivos, usando os parâmetros armazenados na tabela `FileParameters`.
+3. **Finalizar o Processo**:
+    
+    - Após concluir todos os arquivos, atualiza o status do processo na tabela `FileControl` para `Completed`:
+```sql
+UPDATE FileControl
+SET Status = 'Completed', EndTime = GETDATE()
+WHERE ProcessID = ?;
+```
+        
+
+---
+
+### **Exemplo de Execução**
+
+1. **Job no SQL Server Agent**:
+    
+    - Executa o pacote Master a cada minuto.
+2. **Fluxo do Pacote Master**:
+    
+    - A procedure atribui um worker a um processo pendente.
+    - O pacote Master chama o worker correspondente.
+3. **Fluxo do Worker**:
+    
+    - Processa os arquivos do cliente.
+    - Atualiza os status nas tabelas `FileControl` e `FileParameters`.
+
+---
+
+### **Mitigação de Riscos**
+
+1. **Arquivos Presos em `InProgress`**:
+    
+    - Configure scripts para redefinir processos travados:
+```sql
+UPDATE FileControl
+SET Status = 'Pending', WorkerAssigned = NULL, StartTime = NULL
+WHERE Status = 'InProgress' AND DATEDIFF(MINUTE, StartTime, GETDATE()) > 60;
+```
+        
+2. **Registro de Erros**:
+    
+    - Adicione logs detalhados em caso de falhas no worker.
+3. **Controle de Exclusividade**:
+    
+    - A lógica de bloqueio com `ROWLOCK`, `UPDLOCK`, e `READPAST` garante que apenas um processo será atribuído por vez.
+
+---
+
+### **Resumo**
+
+- **FileControl** controla os processos e workers atribuídos.
+- **FileParameters** gerencia os arquivos associados a cada processo.
+- A procedure garante que os processos sejam atribuídos sem conflitos.
+- O Master SSIS distribui a carga para os workers, garantindo escalabilidade.
+
+
+
+
+
+https://chatgpt.com/c/67448a82-8190-8004-aaed-d54af79f516c
