@@ -588,98 +588,11 @@ WHERE Status = 'Failed';
 
 ---
 
-### **2. Dinâmica de Trabalho**
 
-#### **2.1. Organização do Time**
 
-- **Papéis e Responsabilidades**:
-    - **Desenvolvedor SSIS**: Criação e manutenção dos pacotes Master e Workers.
-    - **Administrador de Banco**: Monitoramento e otimização das tabelas e procedures.
-    - **Engenheiro DevOps**: Automação de builds e deploys, gerência de scripts e pacotes em CI/CD.
+### **2. Estratégias para Mitigação de Erros**
 
-#### **2.2. Fluxo de Trabalho**
-
-1. **Solicitações de Mudança (Change Requests)**:
-    
-    - Documente mudanças necessárias (ex.: novos clientes ou alterações em pacotes).
-    - Use ferramentas como Jira, Azure DevOps, ou Trello para acompanhar o progresso.
-2. **Controle de Versão (Git)**:
-    
-    - Armazene scripts SQL, pacotes SSIS e outros artefatos em um repositório Git.
-    - Nomeie as branches de forma clara:
-        - `main`: Produção.
-        - `develop`: Desenvolvimento.
-        - `feature/nova_transformacao`: Funcionalidades em progresso.
-3. **Automação de Builds**:
-    
-    - Use ferramentas como **Azure DevOps Pipelines** ou **Jenkins** para automatizar:
-        - Build de pacotes SSIS.
-        - Validação de sintaxe e execução de testes.
-
----
-
-### **3. CI/CD (Integração e Entrega Contínuas)**
-
-#### **3.1. Pipeline de Integração Contínua**
-
-Automatize a validação e o build de pacotes SSIS e scripts SQL.
-
-**Etapas do Pipeline**:
-
-1. **Validação**:
-    
-    - Verifique a sintaxe de scripts SQL e pacotes SSIS.
-    - Use ferramentas como `dtutil` ou `dtexec` para testar os pacotes:
-```bash
-dtexec /F "C:\SSIS\Packages\ImportPackage.dtsx" /VALIDATE
-```
-        
-2. **Testes Automatizados**:
-    
-    - Execute scripts de teste no banco:
-```sql
-EXEC Test_TransformationLogic;
-```
-        
-3. **Build**:
-    
-    - Compile pacotes SSIS para um ambiente específico:
-```bash
-dtutil /COPY FILE;C:\SSIS\Packages\ImportPackage.dtsx /DestServer myServer
-```
-        
-
----
-
-#### **3.2. Pipeline de Entrega Contínua**
-
-Automatize o deploy dos pacotes SSIS e scripts SQL para diferentes ambientes.
-
-**Etapas do Pipeline**:
-
-1. **Deploy de Scripts SQL**:
-    
-    - Use ferramentas como **Flyway** ou **SQLCMD**:
-```bash
-sqlcmd -S myServer -d myDatabase -i scripts\UpdateFileControl.sql
-```
-        
-2. **Deploy de Pacotes SSIS**:
-    
-    - Publique pacotes SSIS diretamente no servidor de integração:
-```bash
-dtutil /FILE C:\SSIS\Packages\ImportPackage.dtsx /COPY SQL;SSISDB\MyProject
-```
-        
-3. **Validação Pós-Deploy**:
-    
-    - Execute pacotes de teste em ambiente de staging para garantir que a integração está correta.
-
----
-
-### **4. Estratégias para Mitigação de Erros**
-
-#### **4.1. Testes Automatizados**
+#### **2.1. Testes Automatizados**
 
 1. **Testes de Unidade**:
     - Testar individualmente transformações no banco de dados.
@@ -688,7 +601,7 @@ dtutil /FILE C:\SSIS\Packages\ImportPackage.dtsx /COPY SQL;SSISDB\MyProject
 3. **Testes de Performance**:
     - Avaliar o impacto de múltiplos processos executando simultaneamente.
 
-#### **4.2. Estratégia de Rollback**
+#### **2.2. Estratégia de Rollback**
 
 - **Banco de Dados**:
     
@@ -703,25 +616,12 @@ ROLLBACK TRAN; -- Ou COMMIT TRAN, se for bem-sucedido
     
     - Mantenha versões anteriores dos pacotes para reverter rapidamente.
 
-#### **4.3. Acompanhamento Pós-Deploy**
+#### **2.3. Acompanhamento Pós-Deploy**
 
 - **Revisão**:
     - Após cada deploy, revise logs e métricas de execução.
 - **Checklist de Deploy**:
     - Inclua validações manuais ou automatizadas para garantir que o sistema está funcional.
-
----
-
-### **5. Ferramentas Recomendadas**
-
-1. **Controle de Versão**:
-    - GitHub, Azure DevOps, ou GitLab.
-2. **Automação de CI/CD**:
-    - Jenkins, Azure Pipelines, ou Bamboo.
-3. **Monitoramento**:
-    - SQL Server Management Studio (SSMS), Power BI, ou Elastic Stack (ELK).
-4. **Testes**:
-    - UnitTest Frameworks para SQL, como tSQLt.
 
 ---
 
@@ -948,5 +848,3 @@ WHERE Status = 'InProgress' AND DATEDIFF(MINUTE, StartTime, GETDATE()) > 60;
 
 
 
-
-https://chatgpt.com/c/67448a82-8190-8004-aaed-d54af79f516c
