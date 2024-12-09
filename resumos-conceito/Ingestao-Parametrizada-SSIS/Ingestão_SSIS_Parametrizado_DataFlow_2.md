@@ -411,3 +411,112 @@ WHERE Status = 'InProgress' AND DATEDIFF(MINUTE, StartTime, GETDATE()) > 60;
     
 - **Monitoramento Avançado**: Logs detalhados e dashboards oferecem visibilidade completa da solução.
 
+
+
+
+
+---
+
+
+## **1. Fatores que Impactam o Armazenamento**
+
+### **1.1. Volume de Processos**
+
+- O número de **processos registrados** por minuto é crítico. Se o sistema registra e finaliza muitos processos por minuto (por exemplo, centenas ou milhares), o banco pode crescer rapidamente.
+
+### **1.2. Tamanho das Tabelas**
+
+- A tabela `[stage].[FileControl]` acumulará entradas para cada processo gerenciado. Dependendo do tempo de retenção dos dados, essa tabela pode crescer significativamente.
+- A tabela `[stage].[ProcessLog]` (caso o logging seja detalhado) pode consumir muito espaço, especialmente com logs frequentes ou mensagens longas.
+
+### **1.3. Retenção de Dados**
+
+- Se você não implementar um mecanismo de **limpeza ou arquivamento** periódico, os dados históricos continuarão acumulando indefinidamente.
+
+---
+
+## **2. Estratégias para Prevenir Problemas de Armazenamento**
+
+### **2.1. Rotação de Dados**
+
+- **Limpeza Periódica de Dados Antigos:**
+    
+    - Mova processos antigos (ex.: concluídos há mais de 6 meses) para uma tabela de histórico.
+    - Use um job agendado para realizar essa limpeza, por exemplo:
+```sql 
+INSERT INTO [stage].[FileControl_History]
+SELECT * FROM [stage].[FileControl]
+WHERE Status = 'Completed' AND EndTime < DATEADD(MONTH, -6, GETDATE());
+
+DELETE FROM [stage].[FileControl]
+WHERE Status = 'Completed' AND EndTime < DATEADD(MONTH, -6, GETDATE());
+```
+
+        
+- **Rotação de Logs:**
+    
+    - Mova logs antigos para tabelas de histórico ou exporte-os para arquivos externos.
+```sql 
+INSERT INTO [stage].[ProcessLog_History]
+SELECT * FROM [stage].[ProcessLog]
+WHERE LogTime < DATEADD(MONTH, -6, GETDATE());
+
+DELETE FROM [stage].[ProcessLog]
+WHERE LogTime < DATEADD(MONTH, -6, GETDATE());
+```   
+        
+
+---
+
+### **2.2. Monitoramento de Crescimento**
+
+Implemente um sistema para monitorar o tamanho das tabelas:
+
+- Use a query abaixo para verificar o tamanho das tabelas frequentemente:
+```sql 
+EXEC sp_spaceused '[stage].[FileControl]';
+EXEC sp_spaceused '[stage].[ProcessLog]';
+```    
+    
+- Configure alertas para quando o tamanho ultrapassar um limite seguro.
+
+---
+
+### **2.3. Compressão de Dados**
+
+Se você estiver usando o **SQL Server Enterprise Edition**, habilite a **compressão de dados** nas tabelas grandes:
+```sql 
+ALTER TABLE [stage].[FileControl]
+REBUILD WITH (DATA_COMPRESSION = PAGE);
+```
+
+---
+
+### **2.4. Limitar Logging**
+
+Se o volume de logs for muito alto:
+
+- Restrinja o logging apenas aos eventos mais importantes (ex.: erros e informações críticas).
+- Use níveis de log (`Info`, `Warning`, `Error`) para filtrar informações irrelevantes.
+
+---
+
+## **3. Estimativa de Crescimento**
+
+### **Exemplo de Cálculo**
+
+Se você processa 100 processos por minuto e cada registro na tabela `[stage].[FileControl]` ocupa 1 KB:
+
+- **Por dia:** `100 processos/min × 60 min × 24 horas × 1 KB = 144 MB/dia`
+- **Por mês:** `144 MB × 30 dias = ~4,32 GB/mês`
+
+Se você adicionar logs detalhados, esse valor pode dobrar ou triplicar.
+
+---
+
+## **4. Recomendações**
+
+1. **Implemente Rotação de Dados e Logs:** Mantenha apenas os dados relevantes no banco e mova históricos para tabelas secundárias.
+2. **Configure Alertas:** Monitore o tamanho das tabelas e configure notificações para evitar gargalos de armazenamento.
+3. **Faça Auditorias Regulares:** Revise o crescimento das tabelas mensalmente para ajustar estratégias de limpeza.
+4. **Use um Arquivo de Log Externo (se necessário):** Para logs detalhados, exporte-os para arquivos JSON/CSV em vez de armazená-los diretamente no banco.
